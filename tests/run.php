@@ -318,9 +318,9 @@ check(count(CustomContactField::$fields) === 33);
 check($map['fields']['jakawi_user_id'] === 'number');
 check($map['fields']['last_activity_at'] === 'date_time');
 Lists::$entities[0]->slug = 'incompatible';
-fails(fn () => $schema->ensure(), 'SCHEMA_CONFLICT');
+fails(fn () => $schema->ensure(), 'SCHEMA_LIST_CONFLICT');
 check(count(Lists::$entities) === 3);
-check($GLOBALS['fake_options']['jakawi_fluentcrm_schema']['status'] === 'SCHEMA_CONFLICT');
+check($GLOBALS['fake_options']['jakawi_fluentcrm_schema']['status'] === 'SCHEMA_LIST_CONFLICT');
 echo "PASS: $count total bridge assertions (schema idempotency/conflicts)\n";
 // Restore valid schema after the deliberate conflict.
 Lists::$entities[0]->slug = 'jakawi-v1-leads';
@@ -372,10 +372,10 @@ foreach (['first', 'last'] as $prefix) {
 check(Contract::validate(json_encode($coherent), $id)['fields']['first_utm_term'] === null);
 $coherent['fields']['first_touch_at'] = '2026-01-01T00:00:00Z';
 fails(fn () => Contract::validate(json_encode($coherent), $id), 'INCOHERENT_ATTRIBUTION');
-Lists::$entities[0]->title = 'Drift';
-fails(fn () => $schema->map(), 'SCHEMA_DRIFT');
-check($schema->status()['status'] === 'DRIFT');
-Lists::$entities[0]->title = Contract::LISTS['leads'];
+Lists::$entities[0]->slug = 'deleted-slug';
+fails(fn () => $schema->map(), 'SCHEMA_LIST_CONFLICT');
+check($schema->status()['status'] === 'CONFLICT');
+Lists::$entities[0]->slug = 'jakawi-v1-leads';
 $sourceEvent = $next;
 $sourceEvent['occurred_at'] = '2026-12-01T00:00:00Z';
 $sourceEvent['fields']['last_acquisition_provider'] = 'GOOGLE';
@@ -421,3 +421,117 @@ catch (RuntimeException $e) { check($e->getMessage() === 'redirected'); }
 check($schema->status()['status'] === 'READY');
 check(count(FakeApi::$contacts) === $before);
 echo "PASS: $count final bridge assertions\n";
+
+// Reconciliation runs solely against model/option fakes; no WordPress boot.
+$beforeContacts = serialize(FakeApi::$contacts);
+Lists::$entities = [];
+Tag::$entities = [];
+CustomContactField::$fields = [];
+$GLOBALS['fake_options']['jakawi_fluentcrm_schema'] = [];
+check($schema->status()['status'] === 'NOT PROVISIONED');
+$schema->ensure();
+function readySchema(SchemaManager $schema): void
+{
+    $status = $schema->status();
+    check($status['status'] === 'READY');
+    check([$status['lists'], $status['tags'], $status['custom_fields']] === [3, 15, 32]);
+    check(count(Lists::$entities) === 3 && count(Tag::$entities) === 15 && count(CustomContactField::$fields) === 32);
+}
+readySchema($schema);
+$original = $schema->map();
+$schema->ensure();
+readySchema($schema);
+check($schema->map() === $original);
+foreach (['lists', 'tags', 'fields'] as $kind) {
+    $previous = $schema->map();
+    if ($kind === 'lists') {
+        Lists::$entities = array_slice(Lists::$entities, 1);
+    } elseif ($kind === 'tags') {
+        Tag::$entities = array_slice(Tag::$entities, 1);
+    } else {
+        CustomContactField::$fields = array_slice(CustomContactField::$fields, 1);
+    }
+    check($schema->status()['status'] === 'DRIFT');
+    fails(fn () => $schema->map(), 'SCHEMA_DRIFT');
+    $schema->ensure();
+    readySchema($schema);
+    foreach (['lists', 'tags'] as $group) {
+        foreach ($previous[$group] as $key => $entityId) {
+            if ($group === $kind && $key === ($kind === 'lists' ? 'leads' : Contract::TAGS[0])) {
+                check($schema->map()[$group][$key] !== $entityId);
+            } else {
+                check($schema->map()[$group][$key] === $entityId);
+            }
+        }
+    }
+}
+// Replacement IDs are reused; titles/labels do not define stable identity.
+Lists::$entities[0]->id = 900;
+Lists::$entities[0]->title = 'Edited display';
+Tag::$entities[0]->id = 901;
+Tag::$entities[0]->title = 'Edited display';
+CustomContactField::$fields[0]['label'] = 'Edited display';
+check($schema->status()['status'] === 'DRIFT');
+$schema->ensure();
+readySchema($schema);
+check(in_array(900, $schema->map()['lists'], true));
+check(in_array(901, $schema->map()['tags'], true));
+// Partial deletion preserves all remaining compatible IDs.
+$keptList = Lists::$entities[0]->id;
+$keptTag = Tag::$entities[0]->id;
+Lists::$entities = array_slice(Lists::$entities, 0, 1);
+Tag::$entities = array_slice(Tag::$entities, 0, 1);
+CustomContactField::$fields = array_slice(CustomContactField::$fields, 0, 1);
+$schema->ensure();
+readySchema($schema);
+check(in_array($keptList, $schema->map()['lists'], true));
+check(in_array($keptTag, $schema->map()['tags'], true));
+// All deleted with an old latched failure: no manual option cleanup required.
+Lists::$entities = [];
+Tag::$entities = [];
+CustomContactField::$fields = [];
+$GLOBALS['fake_options']['jakawi_fluentcrm_schema']['status'] = 'SCHEMA_FIELD_CONFLICT';
+$GLOBALS['fake_options']['jakawi_fluentcrm_schema']['version'] = 0;
+check($schema->status()['status'] === 'DRIFT');
+$schema->ensure();
+readySchema($schema);
+$badFieldKey = CustomContactField::$fields[0]['slug'];
+CustomContactField::$fields[0]['type'] = 'textarea';
+$beforeEntities = [serialize(Lists::$entities), serialize(Tag::$entities), serialize(CustomContactField::$fields)];
+fails(fn () => $schema->ensure(), 'SCHEMA_FIELD_CONFLICT');
+$diagnostic = $schema->status()['diagnostic'];
+check($schema->status()['status'] === 'CONFLICT');
+check($diagnostic === ['entity_kind' => 'FIELD', 'contract_key' => $badFieldKey, 'error_code' => 'SCHEMA_FIELD_CONFLICT', 'reason' => 'INCOMPATIBLE_FIELD_TYPE']);
+check($GLOBALS['fake_options']['jakawi_fluentcrm_schema']['diagnostic'] === $diagnostic);
+check($beforeEntities === [serialize(Lists::$entities), serialize(Tag::$entities), serialize(CustomContactField::$fields)]);
+CustomContactField::$fields[0]['type'] = 'number';
+$schema->ensure();
+foreach (['lists', 'tags', 'fields'] as $kind) {
+    if ($kind === 'fields') {
+        CustomContactField::$fields[] = CustomContactField::$fields[0];
+        $key = CustomContactField::$fields[0]['slug'];
+        $entityKind = 'FIELD';
+    } else {
+        $class = $kind === 'lists' ? Lists::class : Tag::class;
+        $duplicate = clone $class::$entities[0];
+        $key = substr($duplicate->slug, strlen('jakawi-v1-'));
+        $duplicate->id = 999;
+        $class::$entities[] = $duplicate;
+        $entityKind = $kind === 'lists' ? 'LIST' : 'TAG';
+    }
+    fails(fn () => $schema->ensure(), 'SCHEMA_'.$entityKind.'_CONFLICT');
+    $diagnostic = $schema->status()['diagnostic'];
+    check($diagnostic['entity_kind'] === $entityKind && $diagnostic['contract_key'] === $key && $diagnostic['reason'] === 'AMBIGUOUS_LIVE_MATCHES');
+    if ($kind === 'fields') {
+        array_pop(CustomContactField::$fields);
+    } else {
+        array_pop($class::$entities);
+    }
+    check($schema->status()['status'] === 'DRIFT');
+    $schema->ensure();
+    readySchema($schema);
+}
+check(serialize(FakeApi::$contacts) === $beforeContacts);
+check(Contract::CRM_SCHEMA_VERSION === 1);
+check(str_contains(file_get_contents(__DIR__.'/../jakawi-fluentcrm-bridge.php'), 'PROVISION / REPAIR CRM SCHEMA'));
+echo "PASS: $count bridge assertions including schema repair hotfix\n";

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Jakawi FluentCRM Bridge
  * Description: Disabled-by-default signed JAKAWI contact projection bridge.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Requires PHP: 8.1
  */
 
@@ -21,7 +21,7 @@ function enabled(): bool
 }
 register_activation_hook(__FILE__, function () {
     EventStore::install();
-    update_option('jakawi_fluentcrm_bridge_version', '1.0.0', false);
+    update_option('jakawi_fluentcrm_bridge_version', '1.0.1', false);
 });
 add_action('rest_api_init', function () {
     register_rest_route('jakawi-fluentcrm/v1', '/events', [
@@ -66,7 +66,7 @@ add_action('admin_menu', function () {
         echo '<div class="wrap"><h1>Jakawi CRM Bridge</h1><pre>'.esc_html(wp_json_encode($data, JSON_PRETTY_PRINT)).'</pre>';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
         wp_nonce_field('jakawi_fluentcrm_provision');
-        echo '<input type="hidden" name="action" value="jakawi_fluentcrm_provision"><button class="button button-primary" type="submit">PROVISION CRM SCHEMA</button></form>';
+        echo '<input type="hidden" name="action" value="jakawi_fluentcrm_provision"><button class="button button-primary" type="submit">PROVISION / REPAIR CRM SCHEMA</button></form>';
         $t = EventStore::table();
         $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($t)));
         if ($exists) {

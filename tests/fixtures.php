@@ -23,7 +23,7 @@ namespace FluentCrm\App\Models {
 
         public static function create($data)
         {
-            $entity = (object) ($data + ['id' => count(static::$entities) + 1]);
+            $entity = (object) ($data + ['id' => (static::$entities ? max(array_map(fn ($e) => $e->id, static::$entities)) : 0) + 1]);
             static::$entities[] = $entity;
 
             return $entity;
@@ -272,7 +272,7 @@ namespace {
             return $default;
         }
 
-        return ['version' => 1, 'status' => 'READY', 'map' => ['lists' => array_combine(array_keys(Contract::LISTS), [1, 2, 3]), 'tags' => array_combine(Contract::TAGS, range(1, count(Contract::TAGS)))]];
+        return ['version' => 1, 'status' => 'READY', 'map' => ['lists' => array_combine(array_keys(Contract::LISTS), [1, 2, 3]), 'tags' => array_combine(Contract::TAGS, range(1, count(Contract::TAGS))), 'fields' => array_combine(Contract::FIELDS, array_map(fn ($key) => $key === 'jakawi_user_id' ? 'number' : (str_ends_with($key, '_at') ? 'date_time' : 'text'), Contract::FIELDS))]];
     }
     function do_action(...$args) {}
 }

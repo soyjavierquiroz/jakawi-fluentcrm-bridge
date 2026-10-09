@@ -9,7 +9,7 @@ Define outside this repository in WordPress configuration:
 - `JAKAWI_FLUENTCRM_BRIDGE_ENABLED` (strict boolean, default false)
 - `JAKAWI_FLUENTCRM_BRIDGE_SECRET` (random shared secret of at least 32 bytes, no default)
 
-Activation installs/updates only the technical event/idempotency table and plugin version, regardless of constants. It never provisions CRM entities or contacts. Schema provisioning is exclusively an explicit POST at Tools → Jakawi CRM Bridge → PROVISION CRM SCHEMA, guarded by manage_options and the WordPress nonce `jakawi_fluentcrm_provision`. There is no public provisioning REST route or configuration opt-in. Status reporting: NOT PROVISIONED, READY, DRIFT, CONFLICT, ERROR; counts only, no PII. No provisioning or live operations were performed. This is a clean pre-launch schema with no legacy migration.
+Activation installs/updates only the technical event/idempotency table and plugin version, regardless of constants. It never provisions CRM entities or contacts. Schema provisioning is exclusively an explicit POST at Tools → Jakawi CRM Bridge → PROVISION / REPAIR CRM SCHEMA, guarded by manage_options and the WordPress nonce `jakawi_fluentcrm_provision`. There is no public provisioning REST route or configuration opt-in. Status reporting: NOT PROVISIONED, READY, DRIFT, CONFLICT, ERROR; counts only, no PII. No provisioning or live operations were performed. This is a clean pre-launch schema with no legacy migration.
 
 
 ## Contract
@@ -62,7 +62,7 @@ Run tests/run.php with existing Docker PHP 8.4 and this directory mounted read-o
 }
 ```
 
-Explicit GRANT/REVOKE require matching boolean marketing_opt_in and RFC3339 marketing_opt_in_at in fields. Runtime verifies the saved entity map against current CRM schema without provisioning on requests. Guest submissions to an already linked user contact preserve its product identity, name and domain/list state. Database error printing is suppressed during authenticated processing and restored afterward; errors returned/stored by this plugin are fixed codes only.
+Explicit GRANT/REVOKE require matching boolean marketing_opt_in and RFC3339 marketing_opt_in_at in fields. Runtime verifies the saved entity map against current live CRM schema without provisioning on requests. Guest submissions to an already linked user contact preserve its product identity, name and domain/list state. Database error printing is suppressed during authenticated processing and restored afterward; errors returned/stored by this plugin are fixed codes only.
 
 ## Marketing projection boundaries
 
@@ -81,3 +81,13 @@ Consent checkbox: “Quiero recibir novedades, beneficios y experiencias de JAKA
 Docker PHP 8.4.26 only. Bridge: 112 assertions passed, all eight PHP files passed syntax checks. Laravel CRM focused: 19 tests / 114 assertions passed. Exactly one full Laravel suite: 524 passed, 1 failed, 6660 assertions, 131.12 seconds. The sole failure is the allowed CampaignTest::test_admin_can_create_campaign_and_non_admin_cannot baseline (403 versus expected redirect). No additional regression. Existing test container and isolated jakawi_test PostgreSQL were used, with HTTP fakes; no CRM runtime in Docker.
 
 Both repositories passed git diff --check, including whitespace checks for untracked files. No frontend source changed during this task; no Docker/Vite build. Live mutations: NONE. No provisioning, contacts, real secrets, webhook, plugin activation/deactivation, sync enablement, production migration, deploy, commit or push. Ready to version: SÍ.
+
+## Schema reconciliation hotfix — 1.0.1
+
+Schema V1 remains 3 lists, 15 tags and 32 fields. Provision/repair reads live entities before writes, preflights conflicts, discards stale cached IDs, reuses compatible slug matches (including new IDs), creates missing entities, saves a fresh mapping and validates it before READY. Custom field identity is its slug; the stored field map caches the expected type, not a numeric ID. Display title/label edits do not alter a compatible stable identity.
+
+Missing schema is repairable DRIFT after prior state, or NOT PROVISIONED on an untouched empty schema. A previous failed provisioning option cannot latch CONFLICT indefinitely. Real conflicts are ambiguous live matches, a contract title/label claimed under a different slug, or an incompatible field type. Sanitized diagnostics contain entity_kind (LIST/TAG/FIELD), contract_key, fixed error_code and fixed reason, with no provider text, PII or credentials. Counts reflect live compatible definitions and include expected counts.
+
+Root cause verified in 1.0.0 code: ensure() discarded the saved map on error; status() then counted that missing map as zero and preferred the saved CONFLICT code without reevaluating live conflicts. Those zeros were not live database counts. Deleted IDs did not themselves raise conflict because ensure() already rebuilt its map. The earlier preflight also required exact display titles/labels. Live SQL inspection was unavailable during diagnosis, so the original triggering live entity is not established.
+
+Validation: 230 bridge assertions PASS with WordPress/FluentCRM fakes, including empty schema, repeat runs, deleted lists/tags/fields, full and partial deletion, replacement IDs, incompatible types, ambiguous matches, exact sanitized diagnostics, no contact mutations, technical activation and existing HMAC/contact route tests. Docker PHP 8.4 only; syntax and git diff --check PASS. No Laravel tests or frontend build. No automatic live provisioning, plugin reactivation, service restart, contacts, secrets or sync enablement. After installing the code, click PROVISION / REPAIR CRM SCHEMA once manually.
