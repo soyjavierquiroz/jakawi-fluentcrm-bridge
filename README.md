@@ -1,7 +1,11 @@
-# Jakawi FluentCRM Bridge — V1 (unreleased)
+# Jakawi FluentCRM Bridge — 1.0.1
 
 Independent repository; no Composer runtime dependency. Namespace `Jakawi\FluentCrmBridge`.
-Legacy `jakawi-crm-bridge` remains untouched, active state unchanged, and its endpoint/table/event IDs are never consumed.
+Purpose: secure Laravel → FluentCRM contact projection bridge. Current production uses WordPress + FluentCRM on CyberPanel host runtime, not Docker. Operational reference: 2026-10-09.
+
+## Migration / history
+
+Legacy `jakawi-crm-bridge` is obsolete/inactive. Its endpoint/table/event IDs are not consumed by this bridge. No automatic legacy migration/backfill or contact merge is performed.
 
 ## Configuration and rollout
 
@@ -9,12 +13,19 @@ Define outside this repository in WordPress configuration:
 - `JAKAWI_FLUENTCRM_BRIDGE_ENABLED` (strict boolean, default false)
 - `JAKAWI_FLUENTCRM_BRIDGE_SECRET` (random shared secret of at least 32 bytes, no default)
 
-Activation installs/updates only the technical event/idempotency table and plugin version, regardless of constants. It never provisions CRM entities or contacts. Schema provisioning is exclusively an explicit POST at Tools → Jakawi CRM Bridge → PROVISION / REPAIR CRM SCHEMA, guarded by manage_options and the WordPress nonce `jakawi_fluentcrm_provision`. There is no public provisioning REST route or configuration opt-in. Status reporting: NOT PROVISIONED, READY, DRIFT, CONFLICT, ERROR; counts only, no PII. No provisioning or live operations were performed. This is a clean pre-launch schema with no legacy migration.
+Activation installs/updates only the technical event/idempotency table and plugin version, regardless of constants. It never provisions CRM entities or contacts. Schema provisioning is exclusively an explicit POST at Tools → Jakawi CRM Bridge → PROVISION / REPAIR CRM SCHEMA, guarded by manage_options and the WordPress nonce `jakawi_fluentcrm_provision`. There is no public provisioning REST route or configuration opt-in. Status reporting: NOT PROVISIONED, READY, DRIFT, CONFLICT, ERROR; counts only, no PII. Current schema contract is V1, READY **3 lists / 15 tags / 32 custom fields** when live diagnostics confirm compatibility. Documentation updates do not execute provisioning. No legacy migration is automatic.
 
 
 ## Contract
 
-POST `/wp-json/jakawi-fluentcrm/v1/events`, JSON, maximum 65536 bytes.
+Registered plugin route: `jakawi-fluentcrm/v1/events`, POST JSON, maximum **65536 bytes**.
+
+Laravel supports exactly these production HTTPS forms:
+
+- Canonical: `https://crm.jakawi.com/wp-json/jakawi-fluentcrm/v1/events`
+- Current fallback: `https://crm.jakawi.com/?rest_route=/jakawi-fluentcrm/v1/events`
+
+Current server routing returns 404 for the pretty `/wp-json` form, so production uses the fallback without redirects. Both address the same registered plugin route; fallback is a host routing compatibility choice. No extra queries, alternate hosts or arbitrary endpoint URLs are allowed by Laravel.
 Required keys: version (1), event_id (UUID), operation (CONTACT_UPSERT), occurred_at (RFC3339), source, contact, identity, lists_add, lists_remove, tags_add, tags_remove, fields, marketing.
 `source`: type, id, optional first_attribution / last_attribution clocks {occurred_at,id}.
 `contact`: email, optional name. `identity`: optional jakawi_user_id, provider_contact_id.
@@ -32,7 +43,14 @@ Atomic unique event reservation and transaction, serialized writer lock, SHA256 
 Lists: leads → JAKAWI — Leads; users → JAKAWI — Usuarios; partners → JAKAWI — Partners. Partner applicants never imply confirmed partners. Slugs are namespaced jakawi-v1-*.
 Tags: jakawi-lead, jakawi-user, partner-applicant, program-applicant, jakawi-partner, membership-requested, member-active, member-expired, benefit-redeemer, experience-reserver, challenge-participant, unlock-participant, source-meta, source-tiktok, source-google.
 CRM_SCHEMA_VERSION = 1. Exact counts: 3 lists, 15 tags, 32 custom fields.
-Fields: jakawi_user_id, jakawi_city, jakawi_lifecycle_stage, membership_status, membership_started_at, membership_expires_at, lead_source, lead_form, first_acquisition_provider, first_utm_source, first_utm_medium, first_utm_campaign, first_utm_content, first_utm_term, first_campaign_key, first_landing_slug, first_touch_at, last_acquisition_provider, last_utm_source, last_utm_medium, last_utm_campaign, last_utm_content, last_utm_term, last_campaign_key, last_landing_slug, last_touch_at, signup_at, last_activity_type, last_activity_at, marketing_opt_in, marketing_opt_in_at, marketing_opt_in_source.
+32 fields grouped (LATEST uses last_* names):
+
+| Group | Exact keys |
+| --- | --- |
+| Identity / lifecycle (14) | jakawi_user_id, jakawi_city, jakawi_lifecycle_stage, membership_status, membership_started_at, membership_expires_at, lead_source, lead_form, signup_at, last_activity_type, last_activity_at, marketing_opt_in, marketing_opt_in_at, marketing_opt_in_source |
+| FIRST attribution (9) | first_acquisition_provider, first_utm_source, first_utm_medium, first_utm_campaign, first_utm_content, first_utm_term, first_campaign_key, first_landing_slug, first_touch_at |
+| LATEST attribution (9) | last_acquisition_provider, last_utm_source, last_utm_medium, last_utm_campaign, last_utm_content, last_utm_term, last_campaign_key, last_landing_slug, last_touch_at |
+
 Text fields preserve enumerations/nullable snapshots; user ID is number, timestamps date_time. Product ID never maps to FluentCRM native user_id.
 Resolve provider ID, then custom jakawi_user_id, then normalized email. Incompatible IDs or occupied new email return 409 without merging. Existing unrelated fields remain intact.
 
@@ -76,18 +94,21 @@ Register → users / jakawi-user; promotion removes leads. Partner application w
 
 Consent checkbox: “Quiero recibir novedades, beneficios y experiencias de JAKAWI por email.” Initially checked on new register/partner forms; backend missing/unchecked=false. New true=subscribed, new false=transactional; explicit preference false=unsubscribed; ordinary event=UNCHANGED. No double opt-in. Suppressions unsubscribed/bounced/complained/spammed are always preserved.
 
-## Contract finalization validation — 2026-10-09
-
-Docker PHP 8.4.26 only. Bridge: 112 assertions passed, all eight PHP files passed syntax checks. Laravel CRM focused: 19 tests / 114 assertions passed. Exactly one full Laravel suite: 524 passed, 1 failed, 6660 assertions, 131.12 seconds. The sole failure is the allowed CampaignTest::test_admin_can_create_campaign_and_non_admin_cannot baseline (403 versus expected redirect). No additional regression. Existing test container and isolated jakawi_test PostgreSQL were used, with HTTP fakes; no CRM runtime in Docker.
-
-Both repositories passed git diff --check, including whitespace checks for untracked files. No frontend source changed during this task; no Docker/Vite build. Live mutations: NONE. No provisioning, contacts, real secrets, webhook, plugin activation/deactivation, sync enablement, production migration, deploy, commit or push. Ready to version: SÍ.
-
 ## Schema reconciliation hotfix — 1.0.1
 
 Schema V1 remains 3 lists, 15 tags and 32 fields. Provision/repair reads live entities before writes, preflights conflicts, discards stale cached IDs, reuses compatible slug matches (including new IDs), creates missing entities, saves a fresh mapping and validates it before READY. Custom field identity is its slug; the stored field map caches the expected type, not a numeric ID. Display title/label edits do not alter a compatible stable identity.
 
 Missing schema is repairable DRIFT after prior state, or NOT PROVISIONED on an untouched empty schema. A previous failed provisioning option cannot latch CONFLICT indefinitely. Real conflicts are ambiguous live matches, a contract title/label claimed under a different slug, or an incompatible field type. Sanitized diagnostics contain entity_kind (LIST/TAG/FIELD), contract_key, fixed error_code and fixed reason, with no provider text, PII or credentials. Counts reflect live compatible definitions and include expected counts.
 
-Root cause verified in 1.0.0 code: ensure() discarded the saved map on error; status() then counted that missing map as zero and preferred the saved CONFLICT code without reevaluating live conflicts. Those zeros were not live database counts. Deleted IDs did not themselves raise conflict because ensure() already rebuilt its map. The earlier preflight also required exact display titles/labels. Live SQL inspection was unavailable during diagnosis, so the original triggering live entity is not established.
 
-Validation: 230 bridge assertions PASS with WordPress/FluentCRM fakes, including empty schema, repeat runs, deleted lists/tags/fields, full and partial deletion, replacement IDs, incompatible types, ambiguous matches, exact sanitized diagnostics, no contact mutations, technical activation and existing HMAC/contact route tests. Docker PHP 8.4 only; syntax and git diff --check PASS. No Laravel tests or frontend build. No automatic live provisioning, plugin reactivation, service restart, contacts, secrets or sync enablement. After installing the code, click PROVISION / REPAIR CRM SCHEMA once manually.
+## Admin diagnostics and current operation
+
+Tools → Jakawi CRM Bridge displays live schema status **NOT PROVISIONED / READY / DRIFT / CONFLICT / ERROR**, actual compatible counts vs expected 3/15/32 and sanitized entity_kind/contract_key/error_code/reason. Technical event status totals are also shown; never paste contact bodies or signatures into logs/docs.
+
+Missing schema is repairable via the explicit nonce-protected **PROVISION / REPAIR CRM SCHEMA** Admin POST (manage_options). Activation installs technical storage/version only; neither activation nor authenticated delivery provisions lists/tags/fields automatically. Diagnose drift/conflicts before a separately authorized repair; do not provision as a monitoring check.
+
+Laravel production sync is **CRM_SYNC_ENABLED=true**. Meta provider/browser/CAPI effective flags are false; Meta is separate from this bridge. Delivery retries and requeue live in Laravel, not WordPress: six attempts, 1m/5m/15m/1h/6h; `crm:requeue {deliveryId}` preserves UUID/body/source/attempt history and only makes DEAD/RETRY eligible. CRM failure never rolls back product action.
+
+WordPress cron and current automation state are documented once in the [JAKAWI CRM operations runbook](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/CRM_FOUNDATION_V1.md). Page-load cron is disabled; server cron calls wp-cron every minute using a lock and bounded HTTP timeout. Automations 1–4 remain DRAFT/INACTIVE; Partner Applicant V1 is PUBLISHED/ACTIVE. Do not publish/enrol automations merely to validate delivery.
+
+Authoritative ownership: this README covers plugin configuration/security/schema/diagnostics; the linked JAKAWI document covers sender outbox, cron and automation operations. [Historical validation/hotfix notes](docs/HISTORY.md) are retained as reference and do not establish current runtime state. [CHANGELOG](CHANGELOG.md) records versions; this documentation update keeps plugin **1.0.1**.
