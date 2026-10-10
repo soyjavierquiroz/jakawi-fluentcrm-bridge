@@ -1,7 +1,7 @@
 # Jakawi FluentCRM Bridge — 1.0.1
 
 Independent repository; no Composer runtime dependency. Namespace `Jakawi\FluentCrmBridge`.
-Purpose: secure Laravel → FluentCRM contact projection bridge. Current production uses WordPress + FluentCRM on CyberPanel host runtime, not Docker. Operational reference: 2026-10-09.
+Purpose: secure Laravel → FluentCRM contact projection bridge. The plugin runs inside WordPress with FluentCRM. Production runtime/state: [JAKAWI CURRENT](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/CURRENT.md).
 
 ## Migration / history
 
@@ -23,9 +23,9 @@ Registered plugin route: `jakawi-fluentcrm/v1/events`, POST JSON, maximum **6553
 Laravel supports exactly these production HTTPS forms:
 
 - Canonical: `https://crm.jakawi.com/wp-json/jakawi-fluentcrm/v1/events`
-- Current fallback: `https://crm.jakawi.com/?rest_route=/jakawi-fluentcrm/v1/events`
+- Exact REST fallback: `https://crm.jakawi.com/?rest_route=/jakawi-fluentcrm/v1/events`
 
-Current server routing returns 404 for the pretty `/wp-json` form, so production uses the fallback without redirects. Both address the same registered plugin route; fallback is a host routing compatibility choice. No extra queries, alternate hosts or arbitrary endpoint URLs are allowed by Laravel.
+Both address the same registered plugin route; fallback is a host routing compatibility choice. The currently selected production endpoint and routing observations belong to [JAKAWI CRM operations](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/CRM_FOUNDATION_V1.md). No extra queries, alternate hosts or arbitrary endpoint URLs are allowed by Laravel.
 Required keys: version (1), event_id (UUID), operation (CONTACT_UPSERT), occurred_at (RFC3339), source, contact, identity, lists_add, lists_remove, tags_add, tags_remove, fields, marketing.
 `source`: type, id, optional first_attribution / last_attribution clocks {occurred_at,id}.
 `contact`: email, optional name. `identity`: optional jakawi_user_id, provider_contact_id.
@@ -101,14 +101,14 @@ Schema V1 remains 3 lists, 15 tags and 32 fields. Provision/repair reads live en
 Missing schema is repairable DRIFT after prior state, or NOT PROVISIONED on an untouched empty schema. A previous failed provisioning option cannot latch CONFLICT indefinitely. Real conflicts are ambiguous live matches, a contract title/label claimed under a different slug, or an incompatible field type. Sanitized diagnostics contain entity_kind (LIST/TAG/FIELD), contract_key, fixed error_code and fixed reason, with no provider text, PII or credentials. Counts reflect live compatible definitions and include expected counts.
 
 
-## Admin diagnostics and current operation
+## Admin diagnostics and sender operations
 
 Tools → Jakawi CRM Bridge displays live schema status **NOT PROVISIONED / READY / DRIFT / CONFLICT / ERROR**, actual compatible counts vs expected 3/15/32 and sanitized entity_kind/contract_key/error_code/reason. Technical event status totals are also shown; never paste contact bodies or signatures into logs/docs.
 
 Missing schema is repairable via the explicit nonce-protected **PROVISION / REPAIR CRM SCHEMA** Admin POST (manage_options). Activation installs technical storage/version only; neither activation nor authenticated delivery provisions lists/tags/fields automatically. Diagnose drift/conflicts before a separately authorized repair; do not provision as a monitoring check.
 
-Laravel production sync is **CRM_SYNC_ENABLED=true**. Meta provider/browser/CAPI effective flags are false; Meta is separate from this bridge. Delivery retries and requeue live in Laravel, not WordPress: six attempts, 1m/5m/15m/1h/6h; `crm:requeue {deliveryId}` preserves UUID/body/source/attempt history and only makes DEAD/RETRY eligible. CRM failure never rolls back product action.
+Laravel owns delivery dispatch, retries and requeue; CRM failure never rolls back product action. Sender contract, supported `crm:requeue {deliveryId}` recovery and scheduler mechanics: [JAKAWI CRM](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/CRM_FOUNDATION_V1.md). This plugin does not dispatch the Laravel outbox.
 
-WordPress cron and current automation state are documented once in the [JAKAWI CRM operations runbook](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/CRM_FOUNDATION_V1.md). Page-load cron is disabled; server cron calls wp-cron every minute using a lock and bounded HTTP timeout. Automations 1–4 remain DRAFT/INACTIVE; Partner Applicant V1 is PUBLISHED/ACTIVE. Do not publish/enrol automations merely to validate delivery.
+Sync/provider flags and production state: [JAKAWI CURRENT](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/CURRENT.md). WordPress cron, automation activation state and backlog checks: [JAKAWI CRM operations](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/CRM_FOUNDATION_V1.md). Recovery by symptom: [JAKAWI RUNBOOKS](https://github.com/soyjavierquiroz/jakawi-100/blob/main/docs/operations/RUNBOOKS.md). Do not publish/enrol automations merely to validate delivery.
 
 Authoritative ownership: this README covers plugin configuration/security/schema/diagnostics; the linked JAKAWI document covers sender outbox, cron and automation operations. [Historical validation/hotfix notes](docs/HISTORY.md) are retained as reference and do not establish current runtime state. [CHANGELOG](CHANGELOG.md) records versions; this documentation update keeps plugin **1.0.1**.
